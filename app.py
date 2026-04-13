@@ -39,6 +39,75 @@ bg_loop = asyncio.new_event_loop()
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+# ─── Port code & country lookup ───────────────────────────────────────────────
+
+PORT_CODES: dict[str, str] = {
+    # Norwegen
+    "NOSVG": "Stavanger", "NOBGO": "Bergen", "NOOSL": "Oslo",
+    "NOKRS": "Kristiansand", "NOAES": "Ålesund", "NOTRD": "Trondheim",
+    "NOTOS": "Tromsø", "NOHAU": "Haugesund", "NOMOL": "Molde",
+    "NOFUS": "Flåm", "NOGEI": "Geiranger", "NOLES": "Leknes",
+    "NOSVV": "Svolvær", "NOHON": "Honningsvåg", "NOALK": "Alta",
+    "NOBOD": "Bodø", "NONVK": "Narvik", "NOHRD": "Harstad",
+    "NOOND": "Andenes", "NORRS": "Åndalsnes",
+    # Deutschland
+    "DEHAM": "Hamburg", "DEKIE": "Kiel", "DEBRV": "Bremerhaven",
+    "DEROS": "Rostock", "DEWIS": "Wismar",
+    # Dänemark
+    "DKAAR": "Aarhus", "DKALS": "Aalborg", "DKCPH": "Kopenhagen",
+    "DKFRC": "Fredericia",
+    # Schweden
+    "SEGOT": "Göteborg", "SESTO": "Stockholm", "SEAHU": "Ahus",
+    # Großbritannien
+    "GBSOU": "Southampton", "GBLIV": "Liverpool", "GBDVR": "Dover",
+    # Niederlande
+    "NLRTM": "Rotterdam", "NLAMS": "Amsterdam",
+    # Belgien
+    "BEANR": "Antwerpen",
+    # Spanien
+    "ESBCN": "Barcelona", "ESLPA": "Las Palmas", "ESSPC": "Santa Cruz de Tenerife",
+    # Portugal
+    "PTFNC": "Funchal",
+    # Italien
+    "ITCIV": "Civitavecchia", "ITGOA": "Genua", "ITNAP": "Neapel",
+    # Frankreich
+    "FRMRS": "Marseille",
+    # Kreuzfahrt-Abkürzungen
+    "NOSVG ": "Stavanger",
+}
+
+COUNTRY_DE: dict[str, str] = {
+    "Norway": "Norwegen", "Norge": "Norwegen", "Germany": "Deutschland",
+    "Denmark": "Dänemark", "Sweden": "Schweden", "Finland": "Finnland",
+    "United Kingdom": "Großbritannien", "Netherlands": "Niederlande",
+    "Belgium": "Belgien", "France": "Frankreich", "Spain": "Spanien",
+    "Portugal": "Portugal", "Italy": "Italien", "Iceland": "Island",
+    "Faroe Islands": "Färöer-Inseln", "Greenland": "Grönland",
+    "Estonia": "Estland", "Latvia": "Lettland", "Lithuania": "Litauen",
+    "Poland": "Polen",
+}
+
+
+def decode_port(raw: str) -> str:
+    """Convert AIS destination code or raw string to a readable port name."""
+    if not raw:
+        return ""
+    cleaned = raw.strip().upper()
+    # Try lookup by full code
+    if cleaned in PORT_CODES:
+        return PORT_CODES[cleaned]
+    # Try 5-char LOCODE (e.g. "NOSVG" from "NOSVG  ")
+    for code, name in PORT_CODES.items():
+        if cleaned.startswith(code.strip()):
+            return name
+    # Return title-cased original if not found
+    return raw.strip().title()
+
+
+def country_de(name: str) -> str:
+    return COUNTRY_DE.get(name, name)
+
+
 def reverse_geocode(lat: float, lon: float) -> str | None:
     """Resolve coordinates to a human-readable place name via Nominatim."""
     try:
@@ -54,12 +123,16 @@ def reverse_geocode(lat: float, lon: float) -> str | None:
             addr.get("city")
             or addr.get("town")
             or addr.get("village")
-            or addr.get("county")
-            or addr.get("state")
+            or addr.get("municipality")
         )
-        country = addr.get("country", "")
+        country_raw = addr.get("country", "")
+        country = country_de(country_raw)
         if city:
             return f"{city}, {country}" if country else city
+        # Fallback: state/county + country
+        region = addr.get("county") or addr.get("state")
+        if region:
+            return f"{region}, {country}" if country else region
         display = data.get("display_name", "")
         return display.split(",")[0].strip() if display else None
     except Exception as exc:
@@ -223,20 +296,31 @@ def api_status():
     location = d["location_text"] or "unbekanntem Gebiet"
     speed    = d["speed"] or 0
     ns       = d["nav_status"]
-    dest     = (d.get("destination") or "").strip()
+    dest_raw = (d.get("destination") or "").strip()
+    dest     = decode_port(dest_raw)
     eta_dt   = d.get("eta_dt")
 
-    # Build German announcement
-    if ns in (1, 5) or speed < 0.5:
-        # At anchor (1) or Moored (5)
-        msg = f"{name} liegt gerade im Hafen bei {location}"
-    else:
-        msg = f"{name} befindet sich gerade in der Nähe von {location}"
+    in_port = ns in (1, 5) or speed < 0.5
 
+    # ── Hauptsatz ──────────────────────────────────────────────────────────
+    if in_port:
+        msg = f"{name} liegt gerade im Hafen von {location}"
+    else:
+        knots = f"{speed:.0f}" if speed == int(speed) else f"{speed:.1f}"
+        msg = f"{name} ist auf See in der Nähe von {location} und fährt mit {knots} Knoten"
+
+    # ── Nächster Hafen ─────────────────────────────────────────────────────
     if dest and eta_dt:
         t = eta_text(eta_dt)
-        if t:
+        if t and in_port:
+            msg += f". Nächster Halt: {dest} {t}"
+        elif t and not in_port:
             msg += f". Das Schiff läuft {t} in {dest} ein"
+    elif dest and not eta_dt:
+        if in_port:
+            msg += f". Nächster Halt: {dest}"
+        else:
+            msg += f". Ziel: {dest}"
 
     return jsonify({
         "ok":               True,
@@ -247,6 +331,7 @@ def api_status():
         "speed_knots":      speed,
         "destination":      dest,
         "nav_status":       ns,
+        "in_port":          in_port,
         "data_age_seconds": age,
         "data_fresh":       age < 3_600,
     })
