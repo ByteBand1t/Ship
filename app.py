@@ -129,8 +129,11 @@ async def ais_worker() -> None:
                 ping_timeout=10,
             ) as ws:
                 await ws.send(json.dumps({
-                    "APIKey":             API_KEY,
-                    "BoundingBoxes":      [[[-90, -180], [90, 180]]],
+                    "APIKey": API_KEY,
+                    "BoundingBoxes": [
+                        [[25.0, -20.0], [72.0, 42.0]],   # Europe + Mediterranean + Norway
+                        [[10.0, -90.0], [30.0, -55.0]],  # Caribbean
+                    ],
                     "FiltersShipMMSI":    [MMSI],
                     "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
                 }))
@@ -161,6 +164,11 @@ async def ais_worker() -> None:
                             ship["destination"] = static.get("Destination", "").strip().title()
                             ship["eta_dt"]      = parse_eta(static.get("Eta"))
 
+        except websockets.exceptions.ConnectionClosedError as exc:
+            logging.warning("WebSocket closed with error (code=%s reason=%s)  –  reconnecting in 15 s",
+                            exc.rcvd.code if exc.rcvd else "?",
+                            exc.rcvd.reason if exc.rcvd else "no close frame")
+            await asyncio.sleep(15)
         except websockets.exceptions.ConnectionClosed as exc:
             logging.warning("WebSocket closed: %s  –  reconnecting in 15 s", exc)
             await asyncio.sleep(15)
