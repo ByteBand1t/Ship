@@ -8,8 +8,9 @@ services:
     ports:
       - "5000:5000"
     environment:
-      # ── PFLICHTFELD: API-Key von https://aisstream.io ─────────────────────
-      - AISSTREAM_API_KEY=DEIN_API_KEY_HIER
-
-      # ── Name der Person auf dem Schiff (erscheint in der Ansage) ──────────
-      - PERSON_NAME=Lara
+      # Werte werden aus den Portainer Environment Variables bezogen.
+      # In Portainer → Stack → Environment variables eintragen:
+      #   AISSTREAM_API_KEY = <dein Key von aisstream.io>
+      #   PERSON_NAME       = Lara
+      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
+      - PERSON_NAME=${PERSON_NAME:-Lara}
