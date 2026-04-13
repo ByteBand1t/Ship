@@ -13,7 +13,7 @@ from flask import Flask, jsonify
 # ─── Config ───────────────────────────────────────────────────────────────────
 MMSI        = "247389200"           # AIDAnova
 PERSON_NAME = os.getenv("PERSON_NAME", "Lara")
-API_KEY     = os.getenv("AISSTREAM_API_KEY", "")
+API_KEY     = os.getenv("AISSTREAM_API_KEY", "").strip()
 
 # ─── App setup ────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -139,6 +139,14 @@ def _process_msg(msg: dict) -> None:
 
 async def ais_worker() -> None:
     """Maintain a persistent WebSocket connection to aisstream.io."""
+    # Log key status once on startup
+    if API_KEY:
+        logging.info("API key loaded: length=%d, starts=%r, ends=%r",
+                     len(API_KEY), API_KEY[:4], API_KEY[-4:])
+    else:
+        logging.error("API key is empty!")
+
+    fail_count = 0
     while True:
         if not API_KEY:
             logging.error("AISSTREAM_API_KEY is not set – set it in docker-compose.yml")
@@ -176,16 +184,31 @@ async def ais_worker() -> None:
                     _process_msg(json.loads(raw))
 
         except websockets.exceptions.ConnectionClosedError as exc:
-            logging.warning("WebSocket closed with error (code=%s reason=%s)  –  reconnecting in 15 s",
+            fail_count += 1
+            delay = min(30 * fail_count, 300)  # 30s, 60s, 90s … max 5 min
+            logging.warning("WebSocket closed (code=%s reason=%s) – attempt %d, retry in %ds",
                             exc.rcvd.code if exc.rcvd else "?",
-                            exc.rcvd.reason if exc.rcvd else "no close frame")
-            await asyncio.sleep(15)
+                            exc.rcvd.reason if exc.rcvd else "no close frame",
+                            fail_count, delay)
+            await asyncio.sleep(delay)
         except websockets.exceptions.ConnectionClosed as exc:
-            logging.warning("WebSocket closed: %s  –  reconnecting in 15 s", exc)
-            await asyncio.sleep(15)
+            fail_count += 1
+            delay = min(30 * fail_count, 300)
+            logging.warning("WebSocket closed: %s – attempt %d, retry in %ds", exc, fail_count, delay)
+            await asyncio.sleep(delay)
+        except asyncio.TimeoutError:
+            fail_count += 1
+            delay = min(30 * fail_count, 300)
+            logging.warning("No response from aisstream.io within 5s – attempt %d, retry in %ds",
+                            fail_count, delay)
+            await asyncio.sleep(delay)
         except Exception as exc:
-            logging.error("WebSocket error: %s  –  reconnecting in 30 s", exc)
-            await asyncio.sleep(30)
+            fail_count += 1
+            delay = min(30 * fail_count, 300)
+            logging.error("WebSocket error: %s – attempt %d, retry in %ds", exc, fail_count, delay)
+            await asyncio.sleep(delay)
+        else:
+            fail_count = 0  # reset on clean exit
 
 
 # ─── REST endpoints ───────────────────────────────────────────────────────────
