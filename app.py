@@ -166,22 +166,15 @@ async def ais_worker() -> None:
                     "FiltersShipMMSI":    [MMSI],
                     "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
                 }))
-
-                # Read first response – may be an error message from aisstream.io
-                # e.g. {"error": "Api Key Is Not Valid"}
-                first_raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
-                first_msg = json.loads(first_raw)
-                if "error" in first_msg:
-                    logging.error("aisstream.io error: %s", first_msg["error"])
-                    await asyncio.sleep(60)
-                    continue
-                logging.info("Connected to aisstream.io  |  tracking MMSI %s (%s)", MMSI, PERSON_NAME)
-
-                # Process the first message as a normal AIS message
-                _process_msg(first_msg)
+                logging.info("Subscription gesendet – warte auf AIS-Daten für MMSI %s (%s)", MMSI, PERSON_NAME)
+                fail_count = 0  # reset on successful connect
 
                 async for raw in ws:
-                    _process_msg(json.loads(raw))
+                    msg = json.loads(raw)
+                    if "error" in msg:
+                        logging.error("aisstream.io Fehler: %s", msg["error"])
+                        break
+                    _process_msg(msg)
 
         except websockets.exceptions.ConnectionClosedError as exc:
             fail_count += 1
