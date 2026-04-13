@@ -115,6 +115,28 @@ async def _geocode_task(lat: float, lon: float) -> None:
         ship["last_geocode"] = time.time()
 
 
+def _process_msg(msg: dict) -> None:
+    """Update shared ship state from one AIS message dict."""
+    mtype = msg.get("MessageType")
+    meta  = msg.get("MetaData", {})
+    with lock:
+        ship["last_ais"] = time.time()
+        if mtype == "PositionReport":
+            pos = msg["Message"]["PositionReport"]
+            ship["lat"]        = meta.get("latitude")
+            ship["lon"]        = meta.get("longitude")
+            ship["speed"]      = round(pos.get("Sog", 0), 1)
+            ship["nav_status"] = pos.get("NavigationalStatus", 15)
+            if time.time() - ship["last_geocode"] > 600:
+                asyncio.run_coroutine_threadsafe(
+                    _geocode_task(ship["lat"], ship["lon"]), bg_loop
+                )
+        elif mtype == "ShipStaticData":
+            static = msg["Message"]["ShipStaticData"]
+            ship["destination"] = static.get("Destination", "").strip().title()
+            ship["eta_dt"]      = parse_eta(static.get("Eta"))
+
+
 async def ais_worker() -> None:
     """Maintain a persistent WebSocket connection to aisstream.io."""
     while True:
@@ -131,37 +153,27 @@ async def ais_worker() -> None:
                 await ws.send(json.dumps({
                     "APIKey": API_KEY,
                     "BoundingBoxes": [
-                        [[72.0, -5.0], [53.5, 32.0]],  # Nordnorwegen bis Norddeutschland/Hamburg
+                        [[72.0, -5.0], [53.5, 32.0]],
                     ],
                     "FiltersShipMMSI":    [MMSI],
                     "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
                 }))
+
+                # Read first response – may be an error message from aisstream.io
+                # e.g. {"error": "Api Key Is Not Valid"}
+                first_raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                first_msg = json.loads(first_raw)
+                if "error" in first_msg:
+                    logging.error("aisstream.io error: %s", first_msg["error"])
+                    await asyncio.sleep(60)
+                    continue
                 logging.info("Connected to aisstream.io  |  tracking MMSI %s (%s)", MMSI, PERSON_NAME)
 
+                # Process the first message as a normal AIS message
+                _process_msg(first_msg)
+
                 async for raw in ws:
-                    msg   = json.loads(raw)
-                    mtype = msg.get("MessageType")
-                    meta  = msg.get("MetaData", {})
-
-                    with lock:
-                        ship["last_ais"] = time.time()
-
-                        if mtype == "PositionReport":
-                            pos = msg["Message"]["PositionReport"]
-                            ship["lat"]        = meta.get("latitude")
-                            ship["lon"]        = meta.get("longitude")
-                            ship["speed"]      = round(pos.get("Sog", 0), 1)
-                            ship["nav_status"] = pos.get("NavigationalStatus", 15)
-                            # Trigger reverse geocode at most once per 10 minutes
-                            if time.time() - ship["last_geocode"] > 600:
-                                asyncio.create_task(
-                                    _geocode_task(ship["lat"], ship["lon"])
-                                )
-
-                        elif mtype == "ShipStaticData":
-                            static = msg["Message"]["ShipStaticData"]
-                            ship["destination"] = static.get("Destination", "").strip().title()
-                            ship["eta_dt"]      = parse_eta(static.get("Eta"))
+                    _process_msg(json.loads(raw))
 
         except websockets.exceptions.ConnectionClosedError as exc:
             logging.warning("WebSocket closed with error (code=%s reason=%s)  –  reconnecting in 15 s",
