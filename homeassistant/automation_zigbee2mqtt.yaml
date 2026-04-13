@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Automation: AIDAnova Position per Zigbee-Button ansagen (Zigbee2MQTT Variante)
+#
+# Anpassen:
+#   topic        → zigbee2mqtt/DEIN_BUTTON_NAME
+#                  (Name wie er in Zigbee2MQTT konfiguriert ist)
+#   payload      → je nach Button-Typ: "single", "1_click", "on" etc.
+#                  Im MQTT-Explorer oder z2m-Log nachschauen.
+#   notify.alexa_media_DEIN_GERAET → Namen deines Echo-Geräts anpassen,
+#                  z. B. notify.alexa_media_echo_wohnzimmer
+# ─────────────────────────────────────────────────────────────────────────────
+
+alias: "AIDAnova Position ansagen"
+description: "Zigbee-Button → Alexa sagt Laras aktuelle Position auf der AIDAnova"
+
+trigger:
+  - platform: mqtt
+    topic: "zigbee2mqtt/DEIN_BUTTON_NAME"          # ← anpassen
+    value_template: "{{ value_json.action }}"
+    payload: "single"                               # ← ggf. anpassen
+
+condition: []
+
+action:
+  - service: notify.alexa_media_DEIN_GERAET         # ← anpassen
+    data:
+      message: "{{ states('sensor.aidanova_status') }}"
+      data:
+        type: tts
+
+mode: single

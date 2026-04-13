@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  ship-tracker:
+    build: .
+    container_name: ship-tracker
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      # ── PFLICHTFELD: API-Key von https://aisstream.io ─────────────────────
+      - AISSTREAM_API_KEY=DEIN_API_KEY_HIER
+
+      # ── Name der Person auf dem Schiff (erscheint in der Ansage) ──────────
+      - PERSON_NAME=Lara

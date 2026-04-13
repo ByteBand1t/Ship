@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AIDAnova REST-Sensor für Home Assistant
+#
+# Diesen Block in deine configuration.yaml einfügen.
+# Danach Home Assistant neu starten (Einstellungen → System → Neu starten).
+#
+# DEINE_SERVER_IP ersetzen durch die lokale IP deines Portainer-Servers,
+# z. B. 192.168.1.100
+# ─────────────────────────────────────────────────────────────────────────────
+
+sensor:
+  - platform: rest
+    name: "AIDAnova Status"
+    unique_id: aidanova_status_sensor
+    resource: "http://DEINE_SERVER_IP:5000/api/status"
+    value_template: "{{ value_json.message }}"
+    json_attributes:
+      - location
+      - lat
+      - lon
+      - speed_knots
+      - destination
+      - data_age_seconds
+      - data_fresh
+    scan_interval: 300        # alle 5 Minuten im Hintergrund aktualisieren
