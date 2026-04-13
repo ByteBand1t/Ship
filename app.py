@@ -131,8 +131,7 @@ async def ais_worker() -> None:
                 await ws.send(json.dumps({
                     "APIKey": API_KEY,
                     "BoundingBoxes": [
-                        [[25.0, -20.0], [72.0, 42.0]],   # Europe + Mediterranean + Norway
-                        [[10.0, -90.0], [30.0, -55.0]],  # Caribbean
+                        [[72.0, -5.0], [53.5, 32.0]],  # Nordnorwegen bis Norddeutschland/Hamburg
                     ],
                     "FiltersShipMMSI":    [MMSI],
                     "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
